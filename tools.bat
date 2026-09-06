@@ -88,8 +88,8 @@ echo     [0] Exit
 echo   ---------------------------------------------------------------------------
 echo.
 
-set "choice="
-set /p choice="   Select option [0-9]> "
+set "choice=%~1"
+if not defined choice set /p choice="   Select option [0-9]> "
 if not defined choice goto menu
 
 if "%choice%"=="1" goto dev_mode_all
@@ -117,32 +117,32 @@ echo.
 :: 1. Start PS Servers if not running
 netstat -ano | findstr "0.0.0.0:21000" | findstr "LISTENING" > nul 2>&1
 if !errorlevel! neq 0 (
-    echo [*] Starting SDK Server (:21000)...
+    echo [*] Starting SDK Server [Port 21000]...
     if exist "target\release\sdkserver.exe" (
-        start "Hoyo PS - SDK Server" cmd /k "target\release\sdkserver.exe"
+        start "Hoyo PS - SDK Server" /d "%~dp0" cmd /k "target\release\sdkserver.exe"
     ) else if exist "sdkserver.exe" (
-        start "Hoyo PS - SDK Server" cmd /k "sdkserver.exe"
+        start "Hoyo PS - SDK Server" /d "%~dp0" cmd /k "sdkserver.exe"
     ) else (
-        start "Hoyo PS - SDK Server" cmd /k "cargo run --release -p sdkserver"
+        start "Hoyo PS - SDK Server" /d "%~dp0" cmd /k "cargo run --release -p sdkserver"
     )
-    timeout /t 2 /nobreak >nul
+    ping 127.0.0.1 -n 3 > nul
 ) else (
-    echo [OK] SDK Server (:21000) is already running.
+    echo [OK] SDK Server [Port 21000] is already running.
 )
 
 netstat -ano | findstr "0.0.0.0:23301" > nul 2>&1
 if !errorlevel! neq 0 (
-    echo [*] Starting Gameserver (:23301)...
+    echo [*] Starting Gameserver [Port 23301]...
     if exist "target\release\gameserver.exe" (
-        start "Hoyo PS - Gameserver" cmd /k "target\release\gameserver.exe"
+        start "Hoyo PS - Gameserver" /d "%~dp0" cmd /k "target\release\gameserver.exe"
     ) else if exist "gameserver.exe" (
-        start "Hoyo PS - Gameserver" cmd /k "gameserver.exe"
+        start "Hoyo PS - Gameserver" /d "%~dp0" cmd /k "gameserver.exe"
     ) else (
-        start "Hoyo PS - Gameserver" cmd /k "cargo run --release -p gameserver"
+        start "Hoyo PS - Gameserver" /d "%~dp0" cmd /k "cargo run --release -p gameserver"
     )
-    timeout /t 2 /nobreak >nul
+    ping 127.0.0.1 -n 3 > nul
 ) else (
-    echo [OK] Gameserver (:23301) is already running.
+    echo [OK] Gameserver [Port 23301] is already running.
 )
 
 :: 2. Deploy version.dll and launch game
@@ -350,6 +350,10 @@ for %%F in ("!GAME_DIR!\version.dll.*" "!GAME_DIR!\version_old*") do (
     )
 )
 
+if exist "!GAME_DIR!\launcher.exe" if exist "!GAME_DIR!\hkrpg.dll" (
+    echo [OK] Detected Proxy Launcher and hkrpg.dll in game folder.
+    exit /b 0
+)
 set "HOOK_SRC="
 if exist "!ASTRALOS_DIR!\bin\version.dll" set "HOOK_SRC=!ASTRALOS_DIR!\bin\version.dll"
 if not defined HOOK_SRC if exist "!ASTRALOS_DIR!\target\release\version.dll" set "HOOK_SRC=!ASTRALOS_DIR!\target\release\version.dll"
@@ -358,7 +362,7 @@ if defined HOOK_SRC (
     if exist "!GAME_DIR!\version.dll" attrib -r -h -s "!GAME_DIR!\version.dll" >nul 2>&1
     copy /y "!HOOK_SRC!" "!GAME_DIR!\version.dll" >nul
     attrib +r "!GAME_DIR!\version.dll" >nul 2>&1
-    echo [OK] Deployed version.dll hook from AstralOS and write-protected (+r)!
+    echo [OK] Deployed version.dll hook from AstralOS and write-protected [+R Locked]!
 ) else (
     echo [!] AstralOS version.dll not found. Please build dumper in AstralOS first.
 )
@@ -369,12 +373,13 @@ exit /b 0
 :: ========================================================================
 :launch_game_internal
 echo [*] Launching Star Rail Client (redirected to local PS)...
-if exist "!GAME_DIR!\StarRail.exe" (
-    start "" /d "!GAME_DIR!" "!GAME_DIR!\StarRail.exe"
-    echo [OK] Star Rail launched! Traffic redirected to 127.0.0.1:21000.
-) else if exist "!GAME_DIR!\launcher.exe" (
+if exist "!GAME_DIR!\launcher.exe" (
+    echo [*] Launching via Proxy Launcher (launcher.exe + hkrpg.dll)...
     start "" /d "!GAME_DIR!" "!GAME_DIR!\launcher.exe"
-    echo [OK] Launcher started!
+    echo [OK] Proxy Launcher started! Redirecting to 127.0.0.1:21000.
+) else if exist "!GAME_DIR!\StarRail.exe" (
+    start "" /d "!GAME_DIR!" "!GAME_DIR!\StarRail.exe"
+    echo [OK] Star Rail launched!
 ) else (
     echo [X] Could not find StarRail.exe in '!GAME_DIR!'.
 )
