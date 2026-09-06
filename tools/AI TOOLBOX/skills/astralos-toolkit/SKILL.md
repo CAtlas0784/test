@@ -73,3 +73,25 @@ Available AI MCP Tools:
 2. `find_method_rva`: Resolves method signatures to RVA addresses.
 3. `execute_lua_script`: Dispatches arbitrary XLua scripts to the running game client.
 4. `send_network_packet`: Injects client/server network packets to test gameplay logic.
+
+## 7. Using AstralOS for Private Server Development (`Hoyo-hkrpg-PS`)
+
+### Primary Workflows:
+1. **Testing Game Client against `Hoyo-hkrpg-PS`**:
+   - Run `tools.bat` (option 1 or 2) directly inside `Hoyo-hkrpg-PS`.
+   - Automatically deploys AstralOS's `version.dll` (+r write-protected) to the game directory (`E:\beta hsr\StarRail_4.5.52_OS`).
+   - Launches `StarRail.exe` pre-redirected to local dispatch (`127.0.0.1:21000`) and gameserver (`127.0.0.1:23301`).
+
+2. **Investigating Missing Packets & Infinite Loading Spinners**:
+   - When the client hangs on a 3-dot spinner or fails to open a feature (e.g. MoC, PF, Lineup):
+     - Check console for `[PACKET] Received cmd_id: <ID>`.
+     - If the packet structure or response tags are unknown, run Morax via `tools.bat` option 5 or `bin\morax.exe all --raw -g "E:\beta hsr\StarRail_4.5.52_OS"`.
+     - Morax extracts the exact `StarRail.proto` message fields and `packetIds.json` CmdId mappings from `GameAssembly.dll`.
+
+3. **Generating Server Data (`res.json`)**:
+   - When new maps, mazes, or stages are needed, run `tools.bat` option 6 (`res_compiler.exe "E:\beta hsr\StarRail_4.5.52_OS\Config" "res.json"`).
+
+4. **Live In-Game Testing & Scripts**:
+   - Use `execute_lua_script` via MCP to dispatch live scripts (e.g. `scripts\freecam.lua` or avatar unlocking) directly into the hooked client.
+   - Use `tools.bat` option 7 to set client text language to Thai (`th`).
+   - Use `tools.bat` option 8 to delete `persistent` and reset the player's spawn back to Parlor Car if stuck.
