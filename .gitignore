@@ -1,0 +1,7 @@
+target/
+*.log
+build.log
+/prebuild
+/assets
+.vscode
+.prebuilt

@@ -1,0 +1,23 @@
+{
+  "lineups": {
+    "0": 1501,
+    "1": 1502,
+    "2": 1503,
+    "3": 1506
+  },
+  "position": {
+    "x": -4030,
+    "y": 0,
+    "z": -13006,
+    "rot_y": 270000
+  },
+  "scene": {
+    "plane_id": 10000,
+    "floor_id": 10000000,
+    "entry_id": 100000104
+  },
+  "main_character": "FemaleHarmony",
+  "march_type": "MarchHunt",
+  "enable_sw_global": true,
+  "enable_castorice_global": true
+}
