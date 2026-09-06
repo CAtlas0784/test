@@ -1,37 +1,41 @@
 @echo off
 cd /d "%~dp0"
+
 echo ==============================================
 echo   Starting Hoyo-hkrpg-PS Servers...
 echo ==============================================
 
-set "SDK_EXE="
-if exist "sdkserver.exe" set "SDK_EXE=sdkserver.exe"
-if not defined SDK_EXE if exist "target\release\sdkserver.exe" set "SDK_EXE=target\release\sdkserver.exe"
-if not defined SDK_EXE if exist "target\debug\sdkserver.exe" set "SDK_EXE=target\debug\sdkserver.exe"
+if exist "sdkserver.exe" goto launch
+if exist "target\release\sdkserver.exe" goto launch
 
-set "GAME_EXE="
-if exist "gameserver.exe" set "GAME_EXE=gameserver.exe"
-if not defined GAME_EXE if exist "target\release\gameserver.exe" set "GAME_EXE=target\release\gameserver.exe"
-if not defined GAME_EXE if exist "target\debug\gameserver.exe" set "GAME_EXE=target\debug\gameserver.exe"
-
-if not defined SDK_EXE (
-    echo [!] Server executables not found (target folder was deleted or not built yet).
-    echo [*] Compiling now with 'cargo build --release'...
-    call cargo build --release
-    if exist "target\release\sdkserver.exe" set "SDK_EXE=target\release\sdkserver.exe"
-    if exist "target\release\gameserver.exe" set "GAME_EXE=target\release\gameserver.exe"
-)
-
-if not defined SDK_EXE (
-    echo [X] Build failed or cargo is not installed.
+echo [!] Executables not found. Compiling with cargo build --release...
+call cargo build --release
+if not exist "target\release\sdkserver.exe" (
+    echo [X] Build failed!
     pause
     exit /b 1
 )
 
-echo [*] Launching SDK Server (%SDK_EXE%)...
-start "SDK Server" cmd /k "%SDK_EXE%"
+:launch
+echo [*] Launching SDK Server (:21000)...
+if exist "sdkserver.exe" (
+    start "SDK Server" cmd /k "sdkserver.exe"
+) else (
+    start "SDK Server" cmd /k "target\release\sdkserver.exe"
+)
 
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 > nul
 
-echo [*] Launching Game Server (%GAME_EXE%)...
-start "Game Server" cmd /k "%GAME_EXE%"
+echo [*] Launching Game Server (:23301)...
+if exist "gameserver.exe" (
+    start "Game Server" cmd /k "gameserver.exe"
+) else (
+    start "Game Server" cmd /k "target\release\gameserver.exe"
+)
+
+echo.
+echo ==============================================
+echo [OK] Both servers launched in separate windows!
+echo Keep this window open or press any key to close.
+echo ==============================================
+pause
