@@ -117,7 +117,7 @@ macro_rules! trait_handler {
 
             async fn on_message(session: &mut PlayerSession, cmd_id: u16, payload: Vec<u8>) -> Result<()> {
                 use ::prost::Message;
-                println!("[PACKET] Received cmd_id: {cmd_id}");
+                tracing::info!("[PACKET] Received cmd_id: {cmd_id}");
                 if PlayerSession::should_send_dummy_rsp(cmd_id) {
                     session.send_dummy_response(cmd_id).await?;
                     return Ok(());
@@ -233,20 +233,18 @@ macro_rules! trait_handler {
                         }).await?;
                         Ok(())
                     }
-                    8981 => {
+                    8979 | 8981 => {
+                        let body = challenge::build_get_challenge_tierce_data_sc_rsp();
                         session.send_raw(NetPacket {
-                            cmd_type: 8980,
+                            cmd_type: 8994, // 4.5.52 GetChallengeTierceDataScRsp
                             head: Vec::new(),
-                            body: challenge::build_get_challenge_tierce_data_sc_rsp(),
+                            body: body.clone(),
                         }).await?;
-                        Ok(())
-                    }
-                    8978 => {
-                        session.send_raw(NetPacket {
-                            cmd_type: 8971,
+                        let _ = session.send_raw(NetPacket {
+                            cmd_type: 8980, // legacy fallback
                             head: Vec::new(),
-                            body: vec![0x38, 0x00], // tag 7: retcode = 0
-                        }).await?;
+                            body,
+                        }).await;
                         Ok(())
                     }
                     8909 => {
@@ -290,7 +288,7 @@ macro_rules! trait_handler {
                         Ok(())
                     }
                     8990 => {
-                        session.send_raw(NetPacket { cmd_type: 8985, head: Vec::new(), body: vec![0x68, 0x00] }).await?;
+                        session.send_raw(NetPacket { cmd_type: 8977, head: Vec::new(), body: vec![0x40, 0x00] }).await?;
                         Ok(())
                     }
                     8977 => {
@@ -329,32 +327,59 @@ macro_rules! trait_handler {
                         session.send_raw(NetPacket { cmd_type: 1748, head: Vec::new(), body: Vec::new() }).await?;
                         Ok(())
                     }
-                    1793 => {
+                    1705 | 1793 => {
                         challenge::handle_start_challenge(session, &payload).await
                     }
-                    8988 => {
+                    8983 | 8988 => {
                         challenge::handle_start_challenge_tierce(session, &payload).await
                     }
-                    8979 => {
+                    8978 => {
                         challenge::handle_set_challenge_tierce_lineup(session, &payload).await
                     }
-                    1788 => {
+                    1760 | 1788 => {
                         challenge::handle_leave_challenge(session).await
                     }
-                    8991 => {
+                    8998 => {
                         challenge::handle_leave_challenge_tierce(session).await
                     }
-                    1713 => {
-                        challenge::handle_get_cur_challenge(session).await
+                    8991 => {
+                        // 4.5.52 GetChallengeTierceControllerCsReq -> GetChallengeTierceControllerScRsp (CmdID 8982: tag 14 retcode = 0)
+                        session.send_raw(NetPacket {
+                            cmd_type: 8982,
+                            head: Vec::new(),
+                            body: vec![0x70, 0x00],
+                        }).await?;
+                        Ok(())
+                    }
+                    8987 => {
+                        // 4.5.52 ConfirmChallengeTierceStageSettleCsReq -> ConfirmChallengeTierceStageSettleScRsp (CmdID 8986: tag 7 retcode = 0)
+                        session.send_raw(NetPacket {
+                            cmd_type: 8986,
+                            head: Vec::new(),
+                            body: vec![0x38, 0x00],
+                        }).await?;
+                        Ok(())
                     }
                     1739 => {
                         challenge::handle_take_challenge_reward(session, &payload).await
                     }
                     188 => {
+                        Self::on_get_cur_battle_info_cs_req(session, &proto::GetCurBattleInfoCsReq::default()).await?;
+                        Ok(())
+                    }
+                    4130 => {
                         session.send_raw(NetPacket {
-                            cmd_type: 181,
+                            cmd_type: 4124,
                             head: Vec::new(),
-                            body: vec![0x50, 0x00],
+                            body: vec![0x70, 0x00], // tag 14: retcode = 0 (GetUnreleasedBlockInfoScRsp)
+                        }).await?;
+                        Ok(())
+                    }
+                    8110 => {
+                        session.send_raw(NetPacket {
+                            cmd_type: 8116,
+                            head: Vec::new(),
+                            body: vec![0x38, 0x00], // tag 7: retcode = 0 (GetSwitchHandDataScRsp)
                         }).await?;
                         Ok(())
                     }
@@ -382,6 +407,7 @@ trait_handler! {
     PlayerHeartBeat;
     SetAvatarEnhancedId;
     TakePromotionReward;
+    SyncClientResVersion;
 
     // Entity move (dummy!)
     SceneEntityMove;
@@ -413,11 +439,13 @@ trait_handler! {
     SceneCastSkill;
     QuickStartCocoonStage;
     SceneEnterStage;
+    GetCurBattleInfo;
 
-    // Teleport
+    // Teleport / Scene
     GetEnteredScene;
     GetSceneMapInfo;
     EnterScene;
+    InteractProp;
 
     // Optional
     GetMail;

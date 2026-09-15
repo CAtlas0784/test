@@ -345,22 +345,22 @@ pub fn decode_start_challenge_tierce_req(payload: &[u8]) -> DecodedChallengeStar
             let field_number = (tag >> 3) as u32;
             let wire_type = (tag & 0x7) as u32;
             match (field_number, wire_type) {
-                (1, 0) => {
+                (10, 0) | (1, 0) => {
                     if let Ok(v) = prost::encoding::decode_varint(&mut buf) {
                         req.stage_index = v as u32;
                     }
                 }
-                (3, 0) => {
+                (15, 0) | (3, 0) => {
                     if let Ok(v) = prost::encoding::decode_varint(&mut buf) {
                         req.challenge_id = v as u32;
                     }
                 }
-                (13, 0) => {
+                (5, 0) | (13, 0) => {
                     if let Ok(v) = prost::encoding::decode_varint(&mut buf) {
                         req.is_single_stage = v != 0;
                     }
                 }
-                (14, 2) => {
+                (12, 2) | (14, 2) => {
                     if let Ok(len) = prost::encoding::decode_varint(&mut buf) {
                         let len = len as usize;
                         if len <= buf.len() {
@@ -373,12 +373,12 @@ pub fn decode_start_challenge_tierce_req(payload: &[u8]) -> DecodedChallengeStar
                                     let sub_fn = (sub_tag >> 3) as u32;
                                     let sub_wt = (sub_tag & 0x7) as u32;
                                     match (sub_fn, sub_wt) {
-                                        (5, 0) => {
+                                        (6, 0) | (5, 0) => {
                                             if let Ok(v) = prost::encoding::decode_varint(&mut sub) {
                                                 stage_buff = v as u32;
                                             }
                                         }
-                                        (9, 2) => {
+                                        (4, 2) | (9, 2) => {
                                             if let Ok(alen) = prost::encoding::decode_varint(&mut sub) {
                                                 let alen = alen as usize;
                                                 if alen <= sub.len() {
@@ -389,7 +389,7 @@ pub fn decode_start_challenge_tierce_req(payload: &[u8]) -> DecodedChallengeStar
                                                         if let Ok(atag) = prost::encoding::decode_varint(&mut abuf) {
                                                             let afn = (atag >> 3) as u32;
                                                             let awt = (atag & 0x7) as u32;
-                                                            if afn == 9 && awt == 0 {
+                                                            if (afn == 7 || afn == 9) && awt == 0 {
                                                                 if let Ok(v) = prost::encoding::decode_varint(&mut abuf) {
                                                                     aid = v as u32;
                                                                 }
@@ -667,10 +667,28 @@ pub async fn send_scene_entity_move_sc_notify(
     Ok(())
 }
 
+pub fn map_challenge_stage_id(id: u32) -> u32 {
+    if (5400..=5600).contains(&id) {
+        // Map MoC 1035/1036 (5501..5512, 5401..5412) to available 5301..5312
+        5300 + (id % 100).clamp(1, 12)
+    } else if (20200..=20300).contains(&id) {
+        // Map Pure Fiction (20261..20264) to available 20251..20254
+        20250 + (id % 10).clamp(1, 4)
+    } else if (30200..=30300).contains(&id) {
+        // Map Apocalyptic Shadow (30211..30214) to available 30201..30204
+        30200 + (id % 10).clamp(1, 4)
+    } else if id > 1 && !CHALLENGE_DATA.challenges.contains_key(&id) {
+        id - 1
+    } else {
+        id
+    }
+}
+
 pub async fn handle_start_challenge_tierce(session: &mut PlayerSession, payload: &[u8]) -> Result<()> {
     let req = decode_start_challenge_tierce_req(payload);
-    tracing::info!("handle_start_challenge_tierce: challenge_id={}, stage_index={}, is_single_stage={}",
-        req.challenge_id, req.stage_index, req.is_single_stage);
+    let base_id = map_challenge_stage_id(req.challenge_id);
+    tracing::info!("handle_start_challenge_tierce: challenge_id={} (mapped {}), stage_index={}, is_single_stage={}",
+        req.challenge_id, base_id, req.stage_index, req.is_single_stage);
 
     if !req.stage_info_list.is_empty() {
         if let Ok(mut map) = TIERCE_LINEUPS.lock() {
@@ -702,36 +720,31 @@ pub async fn handle_start_challenge_tierce(session: &mut PlayerSession, payload:
     }
 
     let (entrance, group, monster, event, buff) = if req.stage_index == 2 {
-        if let Some(t) = CHALLENGE_DATA.tierce.get(&req.challenge_id) {
+        if let Some(t) = CHALLENGE_DATA.tierce.get(&base_id) {
             (t.entrance, t.group, t.monster, t.event, req.buff_id)
-        } else if let Some(c) = CHALLENGE_DATA.challenges.get(&req.challenge_id) {
+        } else if let Some(c) = CHALLENGE_DATA.challenges.get(&base_id) {
             (c.entrance2, c.group2, c.monster2, c.event2, if req.buff_id != 0 { req.buff_id } else { c.buff })
         } else {
-            (3014002, 11, 5014010, 30123123, 0)
+            (3014101, 5, 4033010, 30124011, 0)
         }
     } else if req.stage_index == 1 {
-        let base_id = if req.challenge_id > 1 && !CHALLENGE_DATA.challenges.contains_key(&req.challenge_id) {
-            req.challenge_id - 1
-        } else {
-            req.challenge_id
-        };
         if let Some(c) = CHALLENGE_DATA.challenges.get(&base_id) {
             (c.entrance2, c.group2, c.monster2, c.event2, if req.buff_id != 0 { req.buff_id } else { c.buff })
         } else {
-            (3000301, 8, 3003015, 420494, 0)
+            (3014101, 6, 8013010, 30124012, 0)
         }
     } else {
-        let base_id = if req.challenge_id > 1 && !CHALLENGE_DATA.challenges.contains_key(&req.challenge_id) {
-            req.challenge_id - 1
-        } else {
-            req.challenge_id
-        };
         if let Some(c) = CHALLENGE_DATA.challenges.get(&base_id) {
             (c.entrance, c.group1, c.monster1, c.event1, if req.buff_id != 0 { req.buff_id } else { c.buff })
         } else {
-            (3000101, 2, 8013010, 30001011, 0)
+            (3014101, 5, 4033010, 30124011, 0)
         }
     };
+
+    tracing::info!("[CHALLENGE] Start Tierce: challenge_id={} (mapped to {}), stage_index={}, is_single={}",
+        req.challenge_id, base_id, req.stage_index, req.is_single_stage);
+    tracing::info!("[CHALLENGE] Arena: entrance={}, group={}, monster={}, event={}, buff={}",
+        entrance, group, monster, event, buff);
 
     if let Some(json) = session.json_data.get_mut() {
         let mut custom_lineup = BTreeMap::new();
@@ -768,56 +781,100 @@ pub async fn handle_start_challenge_tierce(session: &mut PlayerSession, payload:
         let _ = json.save_persistent().await;
     }
 
-    let (scene_info, motion) = load_challenge_scene(session, entrance, group, monster, event, &chosen_avatars).await?;
+    let (scene_info, _motion) = load_challenge_scene(session, entrance, group, monster, event, &chosen_avatars).await?;
 
-    let mut custom_map = BTreeMap::new();
-    for (i, &aid) in chosen_avatars.iter().enumerate() {
-        custom_map.insert(i as u32, aid);
+    // Prepare all lineups for tierce_info
+    let mut all_lineups: Vec<Vec<u32>> = Vec::new();
+
+    let first_lineup = if !req.first_avatars.is_empty() {
+        req.first_avatars.clone()
+    } else if let Some(s) = req.stage_info_list.get(0) {
+        s.clone()
+    } else if let Ok(map) = TIERCE_LINEUPS.lock() {
+        map.get(&req.challenge_id).and_then(|l| l.get(0)).cloned().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let first_lineup = if first_lineup.is_empty() { chosen_avatars.clone() } else { first_lineup };
+    all_lineups.push(first_lineup.clone());
+
+    if !req.is_single_stage {
+        let second_lineup = if !req.second_avatars.is_empty() {
+            req.second_avatars.clone()
+        } else if let Some(s) = req.stage_info_list.get(1) {
+            s.clone()
+        } else if let Ok(map) = TIERCE_LINEUPS.lock() {
+            map.get(&req.challenge_id).and_then(|l| l.get(1)).cloned().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let second_lineup = if second_lineup.is_empty() { first_lineup.clone() } else { second_lineup };
+        all_lineups.push(second_lineup);
+
+        let third_lineup = if !req.third_avatars.is_empty() {
+            req.third_avatars.clone()
+        } else if let Some(s) = req.stage_info_list.get(2) {
+            s.clone()
+        } else if let Ok(map) = TIERCE_LINEUPS.lock() {
+            map.get(&req.challenge_id).and_then(|l| l.get(2)).cloned().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if !third_lineup.is_empty() || req.stage_index == 2 {
+            all_lineups.push(if third_lineup.is_empty() { first_lineup.clone() } else { third_lineup });
+        }
     }
-    let lineup_info = AvatarJson::to_lineup_info(&custom_map);
 
+    // Modern 4.5.52 ChallengeTierceChallengeInfo (stage_index: 4, challenge_id: 6, is_single_stage: 14, lineup_list: 15)
     let mut tierce_info = Vec::new();
-    if req.is_single_stage {
-        tierce_info.extend_from_slice(&[0x08, 0x01]);
-    }
-    let mut lineup_buf = Vec::new();
-    lineup_info.encode(&mut lineup_buf)?;
-    tierce_info.push(0x3A); // tag 7
-    prost::encoding::encode_varint(lineup_buf.len() as u64, &mut tierce_info);
-    tierce_info.extend_from_slice(&lineup_buf);
-
-    tierce_info.push(0x60); // tag 12
+    tierce_info.push(0x20); // tag 4: stage_index
     prost::encoding::encode_varint(req.stage_index as u64, &mut tierce_info);
-
-    tierce_info.push(0x78); // tag 15
+    tierce_info.push(0x30); // tag 6: challenge_id
     prost::encoding::encode_varint(req.challenge_id as u64, &mut tierce_info);
+    if req.is_single_stage {
+        tierce_info.extend_from_slice(&[0x70, 0x01]); // tag 14: is_single_stage = true
+    }
 
-    let mut body = Vec::new();
-    // tag 4: retcode = 0
-    body.extend_from_slice(&[0x20, 0x00]);
+    for (st_idx, stage_avas) in all_lineups.iter().enumerate() {
+        let mut custom_map = BTreeMap::new();
+        for (i, &aid) in stage_avas.iter().enumerate() {
+            custom_map.insert(i as u32, aid);
+        }
+        let mut lineup = AvatarJson::to_lineup_info(&custom_map);
+        lineup.plane_id = scene_info.plane_id;
+        lineup.extra_lineup_type = ExtraLineupType::LineupChallenge.into();
+        lineup.index = st_idx as u32;
 
-    // tag 7: scene
+        let mut lineup_buf = Vec::new();
+        lineup.encode(&mut lineup_buf)?;
+        tierce_info.push(0x7A); // tag 15: lineup_list
+        prost::encoding::encode_varint(lineup_buf.len() as u64, &mut tierce_info);
+        tierce_info.extend_from_slice(&lineup_buf);
+    }
+
+    tracing::info!("[CHALLENGE] StartTierce: Encoded {} lineups into tierce_info (is_single={})",
+        all_lineups.len(), req.is_single_stage);
+
     let mut scene_buf = Vec::new();
     scene_info.encode(&mut scene_buf)?;
-    body.push(0x3A);
-    prost::encoding::encode_varint(scene_buf.len() as u64, &mut body);
-    body.extend_from_slice(&scene_buf);
 
-    // tag 12: challenge_tierce_info
-    body.push(0x62);
-    prost::encoding::encode_varint(tierce_info.len() as u64, &mut body);
-    body.extend_from_slice(&tierce_info);
+    // Modern 4.5.52 StartChallengeTierceScRsp (CmdID 8973: retcode: 12, challenge_tierce_info: 4, scene: 9)
+    let mut body_8973 = Vec::new();
+    body_8973.extend_from_slice(&[0x60, 0x00]); // tag 12: retcode = 0
+    body_8973.push(0x22); // tag 4: challenge_tierce_info
+    prost::encoding::encode_varint(tierce_info.len() as u64, &mut body_8973);
+    body_8973.extend_from_slice(&tierce_info);
+    body_8973.push(0x4A); // tag 9: scene
+    prost::encoding::encode_varint(scene_buf.len() as u64, &mut body_8973);
+    body_8973.extend_from_slice(&scene_buf);
 
     session.send_raw(NetPacket {
-        cmd_type: 8974,
+        cmd_type: 8973, // StartChallengeTierceScRsp
         head: Vec::new(),
-        body,
+        body: body_8973,
     }).await?;
 
-    for (i, _) in chosen_avatars.iter().enumerate() {
-        let _ = send_scene_entity_move_sc_notify(session, (i as u32) + 1, entrance, &motion).await;
-    }
-
+    // Note: Do NOT send EnterSceneByServerScNotify (1427) because 8973 already contains SceneInfo!
     Ok(())
 }
 
@@ -833,11 +890,15 @@ pub async fn handle_start_challenge(session: &mut PlayerSession, payload: &[u8])
         vec![1304, 1313, 1406, 1004]
     };
 
-    let (entrance, group, monster, event, buff) = if let Some(c) = CHALLENGE_DATA.challenges.get(&req.challenge_id) {
+    let base_id = map_challenge_stage_id(req.challenge_id);
+    let (entrance, group, monster, event, buff) = if let Some(c) = CHALLENGE_DATA.challenges.get(&base_id) {
         (c.entrance, c.group1, c.monster1, c.event1, if req.buff_id != 0 { req.buff_id } else { c.buff })
     } else {
-        (3000101, 2, 8013010, 30001011, 0)
+        (3014101, 5, 4033010, 30124011, 0)
     };
+
+    tracing::info!("[CHALLENGE] Start: challenge_id={} (mapped to {})", req.challenge_id, base_id);
+    tracing::info!("[CHALLENGE] Arena: entrance={}, group={}, monster={}, event={}, buff={}", entrance, group, monster, event, buff);
 
     if let Some(json) = session.json_data.get_mut() {
         let mut custom_lineup = BTreeMap::new();
@@ -874,7 +935,7 @@ pub async fn handle_start_challenge(session: &mut PlayerSession, payload: &[u8])
         let _ = json.save_persistent().await;
     }
 
-    let (scene_info, motion) = load_challenge_scene(session, entrance, group, monster, event, &chosen_avatars).await?;
+    let (scene_info, _motion) = load_challenge_scene(session, entrance, group, monster, event, &chosen_avatars).await?;
 
     let mut custom_map = BTreeMap::new();
     for (i, &aid) in chosen_avatars.iter().enumerate() {
@@ -893,40 +954,43 @@ pub async fn handle_start_challenge(session: &mut PlayerSession, payload: &[u8])
     };
 
     let mut body = Vec::new();
-    // tag 3: retcode = 0
-    body.extend_from_slice(&[0x18, 0x00]);
+    // tag 7: retcode = 0
+    body.extend_from_slice(&[0x38, 0x00]);
 
-    // tag 2: lineup_list
+    // tag 3: lineup_list
     let mut lineup_buf = Vec::new();
     lineup_info.encode(&mut lineup_buf)?;
-    body.push(0x12);
+    body.push(0x1A);
     prost::encoding::encode_varint(lineup_buf.len() as u64, &mut body);
     body.extend_from_slice(&lineup_buf);
 
-    // tag 10: cur_challenge
+    // tag 14: cur_challenge
     let mut chal_buf = Vec::new();
     cur_challenge.encode(&mut chal_buf)?;
-    body.push(0x52);
+    body.push(0x72);
     prost::encoding::encode_varint(chal_buf.len() as u64, &mut body);
     body.extend_from_slice(&chal_buf);
 
-    // tag 14: scene
+    // tag 15: scene
     let mut scene_buf = Vec::new();
     scene_info.encode(&mut scene_buf)?;
-    body.push(0x72);
+    body.push(0x7A);
     prost::encoding::encode_varint(scene_buf.len() as u64, &mut body);
     body.extend_from_slice(&scene_buf);
 
     session.send_raw(NetPacket {
-        cmd_type: 1758,
+        cmd_type: 1775, // Modern 4.5.52 StartChallengeScRsp
         head: Vec::new(),
-        body,
+        body: body.clone(),
     }).await?;
 
-    for (i, _) in chosen_avatars.iter().enumerate() {
-        let _ = send_scene_entity_move_sc_notify(session, (i as u32) + 1, entrance, &motion).await;
-    }
+    let _ = session.send_raw(NetPacket {
+        cmd_type: 1758, // Legacy fallback
+        head: Vec::new(),
+        body,
+    }).await;
 
+    // Note: Do NOT send EnterSceneByServerScNotify (1427) because 1775 already contains SceneInfo!
     Ok(())
 }
 
@@ -937,11 +1001,17 @@ pub async fn handle_set_challenge_tierce_lineup(session: &PlayerSession, payload
             map.insert(challenge_id, stages);
         }
     }
+    // 4.5.52 SetChallengeTierceLineupScRsp (CmdID 8999: tag 1 retcode = 0)
     session.send_raw(NetPacket {
+        cmd_type: 8999,
+        head: Vec::new(),
+        body: vec![0x08, 0x00],
+    }).await?;
+    let _ = session.send_raw(NetPacket {
         cmd_type: 8995,
         head: Vec::new(),
-        body: vec![0x60, 0x00], // tag 12: retcode = 0
-    }).await?;
+        body: vec![0x60, 0x00], // legacy
+    }).await;
     Ok(())
 }
 
@@ -950,11 +1020,17 @@ pub async fn handle_leave_challenge(session: &mut PlayerSession) -> Result<()> {
         json.battle_config.custom_battle_lineup = None;
         let _ = json.save_persistent().await;
     }
+    // 4.5.52 LeaveChallengeScRsp (CmdID 1716: tag 4 retcode = 0)
     session.send_raw(NetPacket {
+        cmd_type: 1716,
+        head: Vec::new(),
+        body: vec![0x20, 0x00], // tag 4: retcode = 0
+    }).await?;
+    let _ = session.send_raw(NetPacket {
         cmd_type: 1781,
         head: Vec::new(),
-        body: vec![0x40, 0x00], // tag 8: retcode = 0
-    }).await?;
+        body: vec![0x40, 0x00], // legacy tag 8: retcode = 0
+    }).await;
     Ok(())
 }
 
@@ -963,11 +1039,17 @@ pub async fn handle_leave_challenge_tierce(session: &mut PlayerSession) -> Resul
         json.battle_config.custom_battle_lineup = None;
         let _ = json.save_persistent().await;
     }
+    // 4.5.52 LeaveChallengeTierceScRsp (CmdID 8997: tag 7 retcode = 0)
     session.send_raw(NetPacket {
+        cmd_type: 8997,
+        head: Vec::new(),
+        body: vec![0x38, 0x00],
+    }).await?;
+    let _ = session.send_raw(NetPacket {
         cmd_type: 8982,
         head: Vec::new(),
-        body: vec![0x68, 0x00], // tag 13: retcode = 0
-    }).await?;
+        body: vec![0x68, 0x00], // legacy
+    }).await;
     Ok(())
 }
 
@@ -983,7 +1065,9 @@ pub fn build_get_challenge_tierce_data_sc_rsp() -> Vec<u8> {
     ];
 
     let mut rsp = Vec::new();
-    // Tag 12: retcode = 0
+    // 4.5.52 Tag 8: retcode = 0
+    rsp.extend_from_slice(&[0x40, 0x00]);
+    // Legacy Tag 12: retcode = 0
     rsp.extend_from_slice(&[0x60, 0x00]);
 
     for (challenge_id, targets, score) in tierce_stages {
@@ -1034,8 +1118,13 @@ pub fn build_get_challenge_tierce_data_sc_rsp() -> Vec<u8> {
             tierce_data.extend_from_slice(&sinfo);
         }
 
-        // Tag 10: challenge_info_list (repeated in GetChallengeTierceDataScRsp)
-        rsp.push(0x52); // Tag 10 (len-delimited)
+        // Tag 4: challenge_info_list (4.5.52)
+        rsp.push(0x22);
+        prost::encoding::encode_varint(tierce_data.len() as u64, &mut rsp);
+        rsp.extend_from_slice(&tierce_data);
+
+        // Tag 10: challenge_info_list (legacy)
+        rsp.push(0x52);
         prost::encoding::encode_varint(tierce_data.len() as u64, &mut rsp);
         rsp.extend_from_slice(&tierce_data);
     }

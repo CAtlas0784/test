@@ -18,15 +18,22 @@ pub async fn on_get_cur_scene_info_cs_req(
         return;
     };
 
+    // If player logged out or got stuck inside a challenge arena, recover back to Parlor Car
+    let entry_id = if player.scene.entry_id >= 3000000 && player.scene.entry_id < 4000000 {
+        1000101
+    } else {
+        player.scene.entry_id
+    };
+
     let default_scene = SceneInfo {
-        game_mode_type: 3,
-        entry_id: player.scene.entry_id,
-        plane_id: player.scene.plane_id,
-        floor_id: player.scene.floor_id,
+        game_mode_type: 1,
+        entry_id,
+        plane_id: if entry_id == 1000101 { 10001 } else { player.scene.plane_id },
+        floor_id: if entry_id == 1000101 { 10001001 } else { player.scene.floor_id },
         ..Default::default()
     };
 
-    let scene = load_scene(session, default_scene.entry_id, false, Option::<u32>::None).await;
+    let scene = load_scene(session, default_scene.entry_id, false, Option::<u32>::None, None).await;
 
     res.scene = if let Ok(scene) = scene {
         Some(scene)
@@ -40,12 +47,115 @@ pub async fn on_enter_scene_cs_req(
     req: &EnterSceneCsReq,
     res: &mut EnterSceneScRsp,
 ) {
-    if load_scene(session, req.entry_id, true, Some(req.entry_id2))
-        .await
-        .is_err()
-    {
-        res.retcode = 2605;
+    tracing::info!(
+        "on_enter_scene_cs_req: entry_id={}, entry_id2={}, interact_id={}, scene_identifier={:?}",
+        req.entry_id, req.entry_id2, req.interact_id, req.scene_identifier
+    );
+
+    let resolved_entry_id = if req.entry_id != 0 && GAME_RES.level_output_configs.contains_key(&req.entry_id) {
+        req.entry_id
+    } else if let Some(&e) = req.scene_identifier.as_ref().and_then(|si| GAME_RES.map_default_entrance_map.get(&si.floor_id)) {
+        e
+    } else if let Some(&e) = GAME_RES.map_default_entrance_map.get(&req.entry_id) {
+        e
+    } else if req.entry_id2 != 0 {
+        let mut found_entry = None;
+        for (&eid, map) in &GAME_RES.level_output_configs {
+            for sc in map.values() {
+                for grp in sc.scenes.values() {
+                    if grp.teleports.contains_key(&req.entry_id2) {
+                        found_entry = Some(eid);
+                        break;
+                    }
+                }
+                if found_entry.is_some() { break; }
+            }
+            if found_entry.is_some() { break; }
+        }
+        found_entry.unwrap_or_else(|| {
+            session.json_data.get().map(|p| p.scene.entry_id).unwrap_or(100000104)
+        })
+    } else if req.interact_id != 0 {
+        let mut found_entry = None;
+        let id32 = req.interact_id as u32;
+        for (&eid, map) in &GAME_RES.level_output_configs {
+            for sc in map.values() {
+                for grp in sc.scenes.values() {
+                    if grp.props.iter().any(|p| p.inst_id == id32 || p.prop_id == id32) {
+                        found_entry = Some(eid);
+                        break;
+                    }
+                }
+                if found_entry.is_some() { break; }
+            }
+            if found_entry.is_some() { break; }
+        }
+        found_entry.unwrap_or_else(|| {
+            session.json_data.get().map(|p| p.scene.entry_id).unwrap_or(100000104)
+        })
+    } else {
+        session.json_data.get().map(|p| p.scene.entry_id).unwrap_or(100000104)
     };
+
+    let teleport_id = if req.entry_id2 != 0 {
+        Some(req.entry_id2)
+    } else if let Some(scene_identifier::TeleportNigger::Mdaidppkopo(t)) =
+        req.scene_identifier.as_ref().and_then(|si| si.teleport_nigger.as_ref())
+    {
+        if t.plidnbmcijh != 0 {
+            Some(t.plidnbmcijh)
+        } else {
+            None
+        }
+    } else if req.interact_id != 0 {
+        let id32 = req.interact_id as u32;
+        GAME_RES.level_output_configs.get(&resolved_entry_id).and_then(|map| {
+            map.values().find_map(|sc| {
+                for grp in sc.scenes.values() {
+                    if grp.props.iter().any(|p| p.inst_id == id32 || p.prop_id == id32) {
+                        if let Some(&tid) = grp.teleports.keys().next() {
+                            return Some(tid);
+                        }
+                    }
+                }
+                None
+            })
+        })
+    } else if req.entry_id != 0 && !GAME_RES.level_output_configs.contains_key(&req.entry_id) {
+        Some(req.entry_id)
+    } else if (resolved_entry_id == 100000104 || resolved_entry_id == 1000001)
+        && req.scene_identifier.as_ref().map_or(false, |si| si.content_id != 0)
+    {
+        Some(2206)
+    } else {
+        None
+    };
+
+    match load_scene(session, resolved_entry_id, true, teleport_id, req.scene_identifier).await {
+        Ok(scene_info) => {
+            res.retcode = 0;
+            res.scene_identifier = scene_info.scene_identifier;
+            res.is_close_map = req.is_close_map;
+        }
+        Err(e) => {
+            tracing::error!("Failed to enter scene {}: {:?}", resolved_entry_id, e);
+            res.retcode = 2605;
+        }
+    }
+}
+
+pub async fn on_interact_prop_cs_req(
+    _session: &mut PlayerSession,
+    req: &InteractPropCsReq,
+    res: &mut InteractPropScRsp,
+) {
+    tracing::info!(
+        "on_interact_prop_cs_req: prop_entity_id={}, interact_id={}, interact_id2={}",
+        req.prop_entity_id, req.interact_id, req.interact_id2
+    );
+    res.retcode = 0;
+    res.prop_entity_id = req.prop_entity_id;
+    res.prop_state = if req.interact_id2 != 0 { req.interact_id2 } else { 1 };
 }
 
 pub async fn on_get_scene_map_info_cs_req(
@@ -53,7 +163,8 @@ pub async fn on_get_scene_map_info_cs_req(
     req: &GetSceneMapInfoCsReq,
     res: &mut GetSceneMapInfoScRsp,
 ) {
-    for floor_id in req.scene_identifiers.iter().map(|v| v.floor_id) {
+    for si in &req.scene_identifiers {
+        let floor_id = si.floor_id;
         let mut map_info = SceneMapInfo {
             chest_list: vec![
                 ChestInfo {
@@ -69,11 +180,8 @@ pub async fn on_get_scene_map_info_cs_req(
                     ..Default::default()
                 },
             ],
-            floor_id: floor_id,
-            scene_identifier: Some(SceneIdentifier {
-                floor_id,
-                ..Default::default()
-            }),
+            floor_id,
+            scene_identifier: Some(*si),
             ..Default::default()
         };
 
@@ -140,6 +248,11 @@ pub async fn on_scene_entity_move_cs_req(
         return;
     };
 
+    // Don't save position if the player is currently inside a challenge arena
+    if player.scene.entry_id >= 3000000 && player.scene.entry_id < 4000000 {
+        return;
+    }
+
     if util::cur_timestamp_ms() <= session.next_scene_save {
         return;
     }
@@ -154,6 +267,9 @@ pub async fn on_scene_entity_move_cs_req(
 
         if let Some(motion) = &entity.motion {
             if let Some(pos) = &motion.pos {
+                if pos.y < -5000 {
+                    return;
+                }
                 player.position.x = pos.x;
                 player.position.y = pos.y;
                 player.position.z = pos.z;
@@ -197,6 +313,7 @@ async fn load_scene(
     entry_id: u32,
     is_enter_scene: bool,
     teleport_id: Option<u32>,
+    req_scene_identifier: Option<SceneIdentifier>,
 ) -> Result<SceneInfo> {
     let Some(json) = session.json_data.get_mut() else {
         tracing::error!("data is not set!");
@@ -237,7 +354,30 @@ async fn load_scene(
             json_pos.z = teleport.pos.z;
             json_pos.rot_y = teleport.rot.y;
         }
+    } else if is_enter_scene || json_pos.y < -5000 {
+        if let Some((_, teleport)) = scene
+            .scenes
+            .iter()
+            .find_map(|v| v.1.teleports.iter().next())
+        {
+            json_pos.x = teleport.pos.x;
+            json_pos.y = teleport.pos.y;
+            json_pos.z = teleport.pos.z;
+            json_pos.rot_y = teleport.rot.y;
+        }
     }
+
+    let scene_identifier = if let Some(mut si) = req_scene_identifier {
+        if si.floor_id == 0 {
+            si.floor_id = floor_id;
+        }
+        si
+    } else {
+        SceneIdentifier {
+            floor_id,
+            ..Default::default()
+        }
+    };
 
     let mut scene_info = SceneInfo {
         floor_id,
@@ -276,10 +416,7 @@ async fn load_scene(
             ..Default::default()
         }),
         floor_saved_data: scene.saved_values.clone(),
-        scene_identifier: Some(SceneIdentifier {
-            floor_id,
-            ..Default::default()
-        }),
+        scene_identifier: Some(scene_identifier),
         ..Default::default()
     };
 
@@ -478,21 +615,49 @@ pub async fn load_challenge_scene(
     let plane_id = split[0][1..].parse::<u32>()?;
     let floor_id = split[1][1..].parse::<u32>()?;
 
-    // Determine spawn position from the first available prop or default
-    let mut spawn_x = 0;
-    let mut spawn_y = 1000;
-    let mut spawn_z = 0;
-    let mut spawn_rot_y = 0;
-
-    for group in scene.scenes.values() {
-        if let Some(prop) = group.props.first() {
-            spawn_x = prop.pos.x;
-            spawn_y = prop.pos.y;
-            spawn_z = prop.pos.z;
-            spawn_rot_y = prop.rot.y;
-            break;
+    // 1. Locate boss monster position first from scene config
+    let (mut mons_pos, inst_id) = if let Some(grp) = scene.scenes.get(&target_group_id) {
+        if let Some(m) = grp.monsters.first() {
+            (Position { x: m.pos.x, y: m.pos.y, z: m.pos.z, rot_y: m.rot.y }, m.inst_id)
+        } else {
+            (Position { x: -61000, y: -2141, z: -170700, rot_y: 90000 }, 1)
         }
-    }
+    } else if let Some((_, grp)) = scene.scenes.iter().find(|(_, g)| !g.monsters.is_empty()) {
+        let m = grp.monsters.first().unwrap();
+        (Position { x: m.pos.x, y: m.pos.y, z: m.pos.z, rot_y: m.rot.y }, m.inst_id)
+    } else {
+        (Position { x: -61000, y: -2141, z: -170700, rot_y: 90000 }, 1)
+    };
+
+    // 2. Position player safely on platform between boss and arena center (0, mons_pos.y, 0)
+    let center_vx = -mons_pos.x as f64;
+    let center_vz = -mons_pos.z as f64;
+    let dist_to_center = (center_vx * center_vx + center_vz * center_vz).sqrt();
+
+    let (spawn_x, spawn_y, spawn_z, spawn_rot_y, boss_rot_y) = if dist_to_center > 1000.0 {
+        let nx = center_vx / dist_to_center;
+        let nz = center_vz / dist_to_center;
+        let offset = 6000.0_f64.min(dist_to_center * 0.6);
+        let sx = mons_pos.x + (nx * offset) as i32;
+        let sz = mons_pos.z + (nz * offset) as i32;
+
+        // Player faces the boss: direction is (-nx, -nz)
+        let p_ang = (-nx).atan2(-nz) * 180.0 / std::f64::consts::PI;
+        let mut p_deg = p_ang as i32;
+        if p_deg < 0 { p_deg += 360; }
+
+        // Boss faces the player: direction is (nx, nz)
+        let b_ang = nx.atan2(nz) * 180.0 / std::f64::consts::PI;
+        let mut b_deg = b_ang as i32;
+        if b_deg < 0 { b_deg += 360; }
+
+        (sx, mons_pos.y, sz, (p_deg * 1000) as i32, (b_deg * 1000) as i32)
+    } else {
+        // Boss is at center: player spawns 6m away facing center
+        (0, mons_pos.y, 6000, 180_000, 0)
+    };
+
+    mons_pos.rot_y = boss_rot_y;
 
     let player_motion = MotionInfo {
         rot: Some(Vector {
@@ -507,11 +672,15 @@ pub async fn load_challenge_scene(
         }),
     };
 
+    json.scene.entry_id = entry_id;
+    json.scene.floor_id = floor_id;
+    json.scene.plane_id = plane_id;
+
     let mut scene_info = SceneInfo {
         floor_id,
         plane_id,
         entry_id,
-        game_mode_type: 4, // GAME_MODE_CHALLENGE
+        game_mode_type: scene.plane_type, // 4 for GAME_MODE_CHALLENGE
         leader_entity_id: 1,
         world_id: if scene.world_id == 100 { 501 } else { scene.world_id },
         lighten_section_list: scene.sections.clone(),
@@ -521,6 +690,7 @@ pub async fn load_challenge_scene(
             floor_id,
             ..Default::default()
         }),
+        scene_mission_info: Some(MissionStatusBySceneInfo::default()),
         ..Default::default()
     };
 
@@ -558,19 +728,6 @@ pub async fn load_challenge_scene(
     }
 
     // Load single boss monster for the challenge
-    let (mons_pos, inst_id) = if let Some(grp) = scene.scenes.get(&target_group_id) {
-        if let Some(m) = grp.monsters.first() {
-            (Position { x: m.pos.x, y: m.pos.y, z: m.pos.z, rot_y: m.rot.y }, m.inst_id)
-        } else {
-            (Position { x: 0, y: 1000, z: -45000, rot_y: 180000 }, 1)
-        }
-    } else if let Some((_, grp)) = scene.scenes.iter().find(|(_, g)| !g.monsters.is_empty()) {
-        let m = grp.monsters.first().unwrap();
-        (Position { x: m.pos.x, y: m.pos.y, z: m.pos.z, rot_y: m.rot.y }, m.inst_id)
-    } else {
-        (Position { x: 0, y: 1000, z: -45000, rot_y: 180000 }, 1)
-    };
-
     let mut monster_group = SceneEntityGroupInfo {
         group_id: target_group_id,
         ..Default::default()
@@ -619,15 +776,7 @@ pub async fn load_challenge_scene(
     };
     scene_info.entity_group_list.push(player_group);
 
-    // Update player's persistent scene location
-    json.scene.entry_id = entry_id;
-    json.scene.floor_id = floor_id;
-    json.scene.plane_id = plane_id;
-    json.position.x = spawn_x;
-    json.position.y = spawn_y;
-    json.position.z = spawn_z;
-    json.position.rot_y = spawn_rot_y;
-    json.save_persistent().await;
+    // Note: Do NOT overwrite json.scene in persistent so player returns to open world on logout/finish!
 
     Ok((scene_info, player_motion))
 }

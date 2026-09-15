@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 use rand::RngExt;
 
@@ -9,12 +10,19 @@ use common::{
 
 use super::*;
 
+pub static CURRENT_BATTLE: LazyLock<Mutex<HashMap<u32, SceneBattleInfo>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 pub async fn on_start_cocoon_stage_cs_req(
     session: &mut PlayerSession,
     req: &StartCocoonStageCsReq,
     res: &mut StartCocoonStageScRsp,
 ) {
     let battle_info = create_battle_info(session, 0, 0).await;
+    CURRENT_BATTLE
+        .lock()
+        .unwrap()
+        .insert(session.token, battle_info.clone());
 
     res.prop_entity_id = req.prop_entity_id;
     res.cocoon_id = req.cocoon_id;
@@ -28,8 +36,12 @@ pub async fn on_quick_start_cocoon_stage_cs_req(
     res: &mut QuickStartCocoonStageScRsp,
 ) {
     let mut battle_info = create_battle_info(session, 0, 0).await;
-
     battle_info.world_level = req.world_level;
+    CURRENT_BATTLE
+        .lock()
+        .unwrap()
+        .insert(session.token, battle_info.clone());
+
     res.cocoon_id = req.cocoon_id;
     res.wave = req.wave;
     res.battle_info = Some(battle_info);
@@ -41,17 +53,23 @@ pub async fn on_scene_enter_stage_cs_req(
     res: &mut SceneEnterStageScRsp,
 ) {
     let battle_info = create_battle_info(session, 0, 0).await;
+    CURRENT_BATTLE
+        .lock()
+        .unwrap()
+        .insert(session.token, battle_info.clone());
 
     res.battle_info = Some(battle_info);
 }
 
 pub async fn on_pve_battle_result_cs_req(
-    _session: &mut PlayerSession,
+    session: &mut PlayerSession,
     req: &PveBattleResultCsReq,
     res: &mut PveBattleResultScRsp,
 ) {
+    CURRENT_BATTLE.lock().unwrap().remove(&session.token);
     res.end_status = req.end_status;
     res.battle_id = req.battle_id;
+    res.stage_id = req.stage_id;
 }
 
 pub async fn on_scene_cast_skill_cs_req(
@@ -61,12 +79,21 @@ pub async fn on_scene_cast_skill_cs_req(
 ) {
     res.cast_entity_id = req.cast_entity_id;
 
-    let targets = req
+    let mut targets = req
         .hit_target_entity_id_list
         .iter()
         .chain(&req.assist_monster_entity_id_list)
-        .filter(|id| **id > 30_000 || **id < 1_000)
+        .copied()
+        .filter(|id| *id > 30_000 || *id < 1_000)
         .collect::<Vec<_>>();
+
+    if targets.is_empty() {
+        if let Some(player) = session.json_data.get() {
+            if player.scene.entry_id >= 3000000 && !player.battle_config.monsters.is_empty() {
+                targets.push(30_001);
+            }
+        }
+    }
 
     if targets.is_empty() {
         tracing::warn!("scene cast skill target is empty!");
@@ -75,11 +102,50 @@ pub async fn on_scene_cast_skill_cs_req(
 
     let battle_info = create_battle_info(session, req.attacked_by_entity_id, req.skill_index).await;
 
+    CURRENT_BATTLE
+        .lock()
+        .unwrap()
+        .insert(session.token, battle_info.clone());
+
     res.cast_entity_id = req.cast_entity_id;
+    res.monster_battle_info = targets
+        .iter()
+        .map(|&id| HitMonsterBattleInfo {
+            target_monster_entity_id: id,
+            monster_battle_type: 0,
+        })
+        .collect();
     res.battle_info = Some(battle_info);
 }
 
-async fn create_battle_info(
+pub async fn on_get_cur_battle_info_cs_req(
+    session: &mut PlayerSession,
+    _req: &GetCurBattleInfoCsReq,
+    res: &mut GetCurBattleInfoScRsp,
+) {
+    if let Some(battle_info) = CURRENT_BATTLE.lock().unwrap().get(&session.token) {
+        res.retcode = 0;
+        res.battle_info = Some(battle_info.clone());
+        return;
+    }
+
+    if let Some(player) = session.json_data.get() {
+        if !player.battle_config.monsters.is_empty() {
+            let battle_info = create_battle_info(session, 0, 0).await;
+            CURRENT_BATTLE
+                .lock()
+                .unwrap()
+                .insert(session.token, battle_info.clone());
+            res.retcode = 0;
+            res.battle_info = Some(battle_info);
+            return;
+        }
+    }
+
+    res.retcode = 2000; // RET_BATTLE_STAGE_NOT_MATCH
+}
+
+pub async fn create_battle_info(
     session: &mut PlayerSession,
     caster_id: u32,
     skill_index: u32,
@@ -383,6 +449,10 @@ async fn create_battle_info(
 
     // Monsters
     battle_info.monster_wave_list = Monster::to_scene_monster_waves(&player.battle_config.monsters);
+    battle_info.jaoiokbbmfc = battle_info.monster_wave_list.len() as u32;
+    for wave in &mut battle_info.monster_wave_list {
+        wave.battle_stage_id = battle_info.stage_id;
+    }
 
     // Rogue Magic
     // TODO: i dont need these shit

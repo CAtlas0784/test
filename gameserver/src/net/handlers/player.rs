@@ -79,3 +79,12 @@ pub async fn on_player_login_finish_cs_req(
 
     Ok(())
 }
+
+pub async fn on_sync_client_res_version_cs_req(
+    _session: &mut PlayerSession,
+    req: &SyncClientResVersionCsReq,
+    res: &mut SyncClientResVersionScRsp,
+) {
+    res.retcode = 0;
+    res.ljkmpimkomo = req.ljkmpimkomo;
+}

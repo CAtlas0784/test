@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-title Hoyo-hkrpg-PS - Private Server Development Suite (powered by AstralOS)
+title Hoyo-hkrpg-PS - Private Server Development Suite [powered by AstralOS]
 color 0B
 chcp 65001 > nul
 cd /d "%~dp0"
@@ -38,57 +38,74 @@ echo   Integrated with AstralOS Reverse Engineering Engine
 echo ==============================================================================
 echo.
 
+:: Privilege Check
+net session >nul 2>&1
+if !errorlevel! equ 0 (
+    set "STATUS_ADMIN=[ELEVATED] Administrator Mode Active"
+) else (
+    set "STATUS_ADMIN=[STANDARD] Standard User Mode"
+)
+
 :: Service Status Check
 netstat -ano | findstr "0.0.0.0:21000" | findstr "LISTENING" > nul 2>&1
 if !errorlevel! equ 0 (
-    set "STATUS_HTTP=[ONLINE]  SDK Server Gateway (:21000)"
+    set "STATUS_HTTP=[ONLINE]   SDK Server Gateway [Port 21000]"
 ) else (
-    set "STATUS_HTTP=[OFFLINE] SDK Server Gateway (:21000)"
+    set "STATUS_HTTP=[OFFLINE]  SDK Server Gateway [Port 21000]"
 )
 
 netstat -ano | findstr "0.0.0.0:23301" > nul 2>&1
 if !errorlevel! equ 0 (
-    set "STATUS_KCP=[ONLINE]  KCP Gameserver      (:23301)"
+    set "STATUS_KCP=[ONLINE]   KCP Gameserver      [Port 23301]"
 ) else (
-    set "STATUS_KCP=[OFFLINE] KCP Gameserver      (:23301)"
+    set "STATUS_KCP=[OFFLINE]  KCP Gameserver      [Port 23301]"
 )
 
-if exist "!GAME_DIR!\version.dll" (
-    set "STATUS_HOOK=[ACTIVE]  Dumper Hook DLL in Game (version.dll)"
+if exist "!GAME_DIR!\launcher.exe" if exist "!GAME_DIR!\hkrpg.dll" (
+    set "STATUS_HOOK=[ACTIVE]   Proxy Launcher [launcher.exe + hkrpg.dll]"
+) else if exist "!GAME_DIR!\version.dll" (
+    set "STATUS_HOOK=[ACTIVE]   Direct Dumper Hook [version.dll]"
 ) else (
-    set "STATUS_HOOK=[NOT HOOKED] version.dll missing from Game Folder"
+    set "STATUS_HOOK=[NOT HOOKED] No proxy hook in Game Folder"
 )
 
 echo   [ STATUS ] -----------------------------------------------------------------
+echo     !STATUS_ADMIN!
 echo     !STATUS_HTTP!
 echo     !STATUS_KCP!
 echo     !STATUS_HOOK!
 if defined GAME_DIR (
-    echo     [CLIENT]  !GAME_DIR!
+    echo     [CLIENT]   !GAME_DIR!
 ) else (
-    echo     [CLIENT]  Not Detected (Will prompt when running)
+    echo     [CLIENT]   Not Detected
 )
 echo   ---------------------------------------------------------------------------
 echo.
 echo   [ PS RUNTIME ^& TESTING ] -------------------------------------------------
-echo     [1] 1-Click PS Dev Mode (Start PS Server + Hook + Launch Game Client)
-echo     [2] Launch Game Client with Hook (Connect to Already Running PS)
-echo     [3] Fix ^& Lock version.dll Hook (Prevent Game from Renaming/Disabling)
-echo     [4] Stop All Running PS Servers (Kill :21000 ^& :23301)
+echo     [1] 1-Click PS Dev Mode [Start PS Server + Hook + Launch Game Client]
+echo     [2] Launch Game Client with Hook [Connect to Already Running PS]
+echo     [3] Fix ^& Lock version.dll Hook [Prevent Game from Renaming/Disabling]
+echo     [4] Stop All Running PS Servers [Kill :21000 ^& :23301]
 echo.
 echo   [ PROTOBUF, PACKETS ^& REVERSE ENGINEERING ] -------------------------------
-echo     [5] Dump StarRail.proto ^& packetIds.json (Morax IL2CPP Parser)
-echo     [6] Compile res.json for Server (AstralOS Res Compiler)
+echo     [5] Dump StarRail.proto ^& packetIds.json [Morax IL2CPP Parser]
+echo     [6] Compile res.json for Server [AstralOS Res Compiler]
 echo.
 echo   [ CLIENT TWEAKS ^& STATE MANAGEMENT ] --------------------------------------
-echo     [7] Switch Game Language to Thai (th) / English (en)
-echo     [8] Reset Player Spawn Position (Clean persistent file)
+echo     [7] Switch Game Language to Thai [th] / English [en]
+echo     [8] Reset Player Spawn Position [Clean persistent file]
 echo     [9] Open Full AstralOS Master Control Suite
 echo     [0] Exit
 echo   ---------------------------------------------------------------------------
 echo.
 
-set "choice=%~1"
+if not defined INITIAL_ARG (
+    set "INITIAL_ARG=1"
+    set "choice=%~1"
+) else (
+    set "choice="
+)
+
 if not defined choice set /p choice="   Select option [0-9]> "
 if not defined choice goto menu
 
@@ -148,7 +165,10 @@ if !errorlevel! neq 0 (
 :: 2. Deploy version.dll and launch game
 call :deploy_hook_internal
 call :launch_game_internal
-pause
+echo.
+echo [OK] 1-Click Dev Mode completed! Servers and Game are running.
+echo Press any key to return to menu...
+pause > nul
 goto menu
 
 :: ========================================================================
@@ -162,7 +182,9 @@ echo ===========================================================================
 echo.
 call :deploy_hook_internal
 call :launch_game_internal
-pause
+echo.
+echo Press any key to return to menu...
+pause > nul
 goto menu
 
 :: ========================================================================
@@ -190,7 +212,7 @@ echo [*] Terminating Hoyo-hkrpg-PS and AstralOS server processes...
 taskkill /F /IM sdkserver.exe /T >nul 2>&1
 taskkill /F /IM gameserver.exe /T >nul 2>&1
 taskkill /F /IM robinsr.exe /T >nul 2>&1
-echo [OK] All local servers stopped. Ports 21000 & 23301 are free!
+echo [OK] All local servers stopped. Ports 21000 ^& 23301 are free!
 ping 127.0.0.1 -n 2 > nul
 goto menu
 
@@ -200,32 +222,55 @@ goto menu
 :dump_morax_proto
 echo.
 echo ==============================================================================
-echo   [Morax Proto Dumper] Extracting Latest Protobuf & Packet Schemas
+echo   [Morax Proto Dumper] Extracting Latest Protobuf ^& Packet Schemas
 echo ==============================================================================
 echo.
 if not defined GAME_DIR (
-    set /p GAME_DIR="   Enter Star Rail game folder (with GameAssembly.dll): "
+    set /p GAME_DIR="   Enter Star Rail game folder: "
 )
 
 set "DUMP_OUT=%~dp0tools\DUMP"
-if not exist "!DUMP_OUT!" mkdir "!DUMP_OUT!"
+if not exist "%DUMP_OUT%" mkdir "%DUMP_OUT%"
 
-echo [*] Target Game: !GAME_DIR!
-echo [*] Output Directory: !DUMP_OUT!
-echo [*] Running Morax Engine from AstralOS...
+set "MORAX_BIN="
+if exist "!ASTRALOS_DIR!\bin\morax.exe" set "MORAX_BIN=!ASTRALOS_DIR!\bin\morax.exe"
+if not defined MORAX_BIN if exist "!ASTRALOS_DIR!\target\release\morax.exe" set "MORAX_BIN=!ASTRALOS_DIR!\target\release\morax.exe"
+if not defined MORAX_BIN if exist "%~dp0tools\morax.exe" set "MORAX_BIN=%~dp0tools\morax.exe"
 
-if exist "!ASTRALOS_DIR!\bin\morax.exe" (
-    "!ASTRALOS_DIR!\bin\morax.exe" all --raw -g "!GAME_DIR!" -o "!DUMP_OUT!"
-) else (
-    cargo run --release --manifest-path "!ASTRALOS_DIR!\Cargo.toml" -p morax --bin morax -- all --raw -g "!GAME_DIR!" -o "!DUMP_OUT!"
+if not defined MORAX_BIN (
+    echo [*] Morax binary not found. Compiling via Cargo in AstralOS...
+    if exist "!ASTRALOS_DIR!\Cargo.toml" (
+        pushd "!ASTRALOS_DIR!"
+        cargo build --release -p morax
+        popd
+        if exist "!ASTRALOS_DIR!\target\release\morax.exe" (
+            set "MORAX_BIN=!ASTRALOS_DIR!\target\release\morax.exe"
+        )
+    )
 )
 
+if not defined MORAX_BIN (
+    echo [X] Could not find or build morax.exe!
+    pause
+    goto menu
+)
+
+echo [*] Using Morax: !MORAX_BIN!
+echo [*] Target Game: !GAME_DIR!
+echo [*] Output Dir:  %DUMP_OUT%
 echo.
-echo [OK] Morax dump finished! Check '!DUMP_OUT!' for:
-echo      - StarRail.proto
-echo      - packetIds.json
-echo      - dump.cs
-echo      - methods.json
+"!MORAX_BIN!" dump-proto --game-path "!GAME_DIR!" --out "%DUMP_OUT%"
+if !errorlevel! equ 0 (
+    echo.
+    echo [OK] Successfully dumped protobuf definitions to: %DUMP_OUT%
+    echo [*] Updating packetIds.json into Hoyo-hkrpg-PS repo...
+    if exist "%DUMP_OUT%\packetIds.json" (
+        copy /y "%DUMP_OUT%\packetIds.json" "%~dp0data\packetIds.json" >nul 2>&1
+        echo [OK] Synced data\packetIds.json!
+    )
+) else (
+    echo [X] Morax dump failed. Ensure GameAssembly.dll is present in game folder.
+)
 echo.
 pause
 goto menu
@@ -236,66 +281,50 @@ goto menu
 :compile_res_json
 echo.
 echo ==============================================================================
-echo   [Resource Compiler] Compiling res.json for Hoyo-hkrpg-PS
+echo   [Compile res.json] Rebuilding Server Resource Database
 echo ==============================================================================
 echo.
-set "RES_SRC=!GAME_DIR!\Config"
-if not exist "!RES_SRC!" (
-    set /p RES_SRC="   Enter raw Resources or Config folder path: "
-)
-
-echo [*] Compiling from '!RES_SRC!' to '%~dp0res.json'...
-if exist "!ASTRALOS_DIR!\bin\res_compiler.exe" (
-    "!ASTRALOS_DIR!\bin\res_compiler.exe" "!RES_SRC!" "%~dp0res.json"
+if exist "!ASTRALOS_DIR!\Cargo.toml" (
+    echo [*] Running resource compiler from AstralOS...
+    pushd "!ASTRALOS_DIR!"
+    cargo run --release -p robinsr -- compile-res --out "%~dp0res.json"
+    popd
+    echo [OK] res.json generated at: %~dp0res.json
 ) else (
-    cargo run --release --manifest-path "!ASTRALOS_DIR!\Cargo.toml" -p morax --bin res_compiler -- "!RES_SRC!" "%~dp0res.json"
+    echo [!] AstralOS repository not found at !ASTRALOS_DIR!.
 )
 echo.
 pause
 goto menu
 
 :: ========================================================================
-:: [7] Switch Game Language (Thai / English)
+:: [7] Switch Game Client Language
 :: ========================================================================
 :switch_lang
 echo.
 echo ==============================================================================
-echo   [Language Switcher] Set Game Client Language for Testing
+echo   [Client Language Switcher]
 echo ==============================================================================
+echo   1. Thai    [th]
+echo   2. English [en]
+echo   3. Japanese [ja]
+echo   4. Simplified Chinese [zh-cn]
 echo.
-echo   [1] Thai Text + Japanese Voice (th / ja)
-echo   [2] English Text + English Voice (en / en)
-echo   [3] English Text + Japanese Voice (en / ja)
-echo.
-set "LCHOICE="
-set /p LCHOICE="   Select language preset [1-3, default=1]: "
-if "!LCHOICE!"=="" set LCHOICE=1
+set /p LANG_CHOICE="   Choose language [1-4]> "
+set "TARGET_LANG="
+if "%LANG_CHOICE%"=="1" set "TARGET_LANG=th"
+if "%LANG_CHOICE%"=="2" set "TARGET_LANG=en"
+if "%LANG_CHOICE%"=="3" set "TARGET_LANG=ja"
+if "%LANG_CHOICE%"=="4" set "TARGET_LANG=zh-cn"
 
-if "!LCHOICE!"=="1" (
-    set "T_HEX=746800"
-    set "V_HEX=6A7000"
-    set "T_CODE=th"
-    set "V_CODE=ja"
-) else if "!LCHOICE!"=="2" (
-    set "T_HEX=656E00"
-    set "V_HEX=656E00"
-    set "T_CODE=en"
-    set "V_CODE=en"
+if defined TARGET_LANG (
+    echo [*] Setting client language to: !TARGET_LANG!...
+    reg add "HKCU\Software\Cognosphere\Star Rail" /v "Language_h2876912797" /t REG_SZ /d "!TARGET_LANG!" /f >nul 2>&1
+    reg add "HKCU\Software\Cognosphere\Star Rail" /v "MIHOYOSDK_CURRENT_LANGUAGE_h255914971" /t REG_SZ /d "!TARGET_LANG!" /f >nul 2>&1
+    echo [OK] Registry updated!
 ) else (
-    set "T_HEX=656E00"
-    set "V_HEX=6A7000"
-    set "T_CODE=en"
-    set "V_CODE=ja"
+    echo [!] Invalid selection.
 )
-
-reg add "HKCU\Software\Cognosphere\Star Rail" /v "LanguageSettings_LocalTextLanguage_h2764291023" /t REG_BINARY /d "!T_HEX!" /f >nul 2>&1
-reg add "HKCU\Software\Cognosphere\Star Rail" /v "LanguageSettings_LocalAudioLanguage_h882585060" /t REG_BINARY /d "!V_HEX!" /f >nul 2>&1
-reg add "HKCU\Software\Cognosphere\Star Rail" /v "MIHOYOSDK_CURRENT_LANGUAGE_h2559149783" /t REG_BINARY /d "!T_HEX!" /f >nul 2>&1
-
-if defined GAME_DIR if exist "!GAME_DIR!" (
-    powershell -NoProfile -Command "$cfg = @{ TextLanguage = '!T_CODE!'; VoiceLanguage = '!V_CODE!' }; $json = $cfg | ConvertTo-Json; Set-Content -Path '!GAME_DIR!\GeneralConfig.json' -Value $json -Force" >nul 2>&1
-)
-echo [OK] Set game language to Text=[!T_CODE!] Voice=[!V_CODE!]!
 echo.
 pause
 goto menu
@@ -305,25 +334,28 @@ goto menu
 :: ========================================================================
 :reset_player_state
 echo.
-echo [*] Resetting Hoyo-hkrpg-PS player spawn position...
-if exist "persistent" (
-    del /f /q "persistent" >nul 2>&1
-    echo [OK] Cleared 'persistent' state file. Player will respawn at Parlor Car upon login.
-) else (
-    echo [OK] 'persistent' file is already clean.
-)
-ping 127.0.0.1 -n 2 > nul
+echo ==============================================================================
+echo   [Reset Player Position]
+echo ==============================================================================
+echo [*] Cleaning cached persistent player position / state files...
+if exist "%~dp0data\saved_position.json" del /f /q "%~dp0data\saved_position.json" >nul 2>&1
+if exist "%~dp0position.json" del /f /q "%~dp0position.json" >nul 2>&1
+if exist "%~dp0persistent" del /f /q "%~dp0persistent" >nul 2>&1
+echo [OK] Spawn state reset. Next login will spawn at default position [Parlor Car].
+echo.
+pause
 goto menu
 
 :: ========================================================================
 :: [9] Open Full AstralOS Master Control Suite
 :: ========================================================================
 :open_astralos_suite
-if exist "!ASTRALOS_DIR!\menu.bat" (
-    start "AstralOS Master Suite" cmd /c "cd /d !ASTRALOS_DIR! && menu.bat"
+echo.
+echo [*] Launching AstralOS Master Development Suite...
+if exist "!ASTRALOS_DIR!\tools.bat" (
+    start "" /d "!ASTRALOS_DIR!" cmd /k "!ASTRALOS_DIR!\tools.bat"
 ) else (
-    echo [X] AstralOS folder not found at '!ASTRALOS_DIR!'.
-    pause
+    echo [!] AstralOS tools.bat not found at !ASTRALOS_DIR!.
 )
 goto menu
 
@@ -332,7 +364,7 @@ goto menu
 :: ========================================================================
 :deploy_hook_internal
 if not defined GAME_DIR (
-    set /p GAME_DIR="   Enter Star Rail game folder (with StarRail.exe): "
+    set /p GAME_DIR="   Enter Star Rail game folder: "
 )
 if not exist "!GAME_DIR!" (
     echo [X] Game directory '!GAME_DIR!' not found!
@@ -372,13 +404,19 @@ exit /b 0
 :: Helper: Launch Game Client
 :: ========================================================================
 :launch_game_internal
-echo [*] Launching Star Rail Client (redirected to local PS)...
+echo [*] Launching Star Rail Client [redirected to local PS]...
 if exist "!GAME_DIR!\launcher.exe" (
-    echo [*] Launching via Proxy Launcher (launcher.exe + hkrpg.dll)...
-    start "" /d "!GAME_DIR!" "!GAME_DIR!\launcher.exe"
+    echo [*] Launching via Proxy Launcher [launcher.exe + hkrpg.dll]...
+    net session >nul 2>&1
+    if !errorlevel! equ 0 (
+        start "Hoyo PS - Proxy Launcher" /d "!GAME_DIR!" "!GAME_DIR!\launcher.exe"
+    ) else (
+        echo [*] Elevating Proxy Launcher as Administrator...
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '!GAME_DIR!\launcher.exe' -WorkingDirectory '!GAME_DIR!' -Verb RunAs"
+    )
     echo [OK] Proxy Launcher started! Redirecting to 127.0.0.1:21000.
 ) else if exist "!GAME_DIR!\StarRail.exe" (
-    start "" /d "!GAME_DIR!" "!GAME_DIR!\StarRail.exe"
+    start "Hoyo PS - Star Rail" /d "!GAME_DIR!" "!GAME_DIR!\StarRail.exe"
     echo [OK] Star Rail launched!
 ) else (
     echo [X] Could not find StarRail.exe in '!GAME_DIR!'.

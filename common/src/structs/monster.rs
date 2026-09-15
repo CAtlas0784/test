@@ -22,11 +22,7 @@ impl_from!(Monster, SceneMonster, |value| {
 });
 
 impl Monster {
-    pub fn to_scene_monster_wave(mut wave_id: u32, monsters: &[Self]) -> SceneMonsterWave {
-        if wave_id < 1 {
-            wave_id += 1;
-        }
-
+    pub fn to_scene_monster_wave(wave_id: u32, monsters: &[Self]) -> SceneMonsterWave {
         SceneMonsterWave {
             battle_wave_id: wave_id,
             monster_param: Some(SceneMonsterWaveParam {
@@ -43,7 +39,7 @@ impl Monster {
         monsters
             .iter()
             .enumerate()
-            .map(|(i, v)| Self::to_scene_monster_wave(i as u32, v))
+            .map(|(i, v)| Self::to_scene_monster_wave((i + 1) as u32, v))
             .collect::<_>()
     }
 }

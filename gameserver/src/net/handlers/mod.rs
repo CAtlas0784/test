@@ -96,7 +96,6 @@ dummy! {
     GetExpeditionData,
     // GetRogueDialogueEventData,
     GetJukeboxData,
-    SyncClientResVersion,
     // DailyFirstMeetPam, // ?3.7.51
     // GetMuseumInfo, // ?3.7.51
     GetLoginActivity,
@@ -109,10 +108,8 @@ dummy! {
     // GetChatFriendHistory,
     GetSecretKeyInfo,
     GetVideoVersionKey,
-    GetCurBattleInfo,
     GetPhoneData,
     // PlayerLoginFinish,
-    InteractProp,
     FinishTalkMission,
     GetRechargeGiftInfo,
     // RelicRecommend
