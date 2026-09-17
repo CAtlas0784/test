@@ -6,8 +6,9 @@ A native, high-performance Rust private server implementation for Honkai: Star R
 
 ## 🌟 About This Project / Contribution Notice
 
-This repository is forked and actively contributed/developed upon the foundation of:
-- **RobinSR & JadeSR** by [reversedrooms](https://git.xeondev.com/reversedrooms):
+This repository is forked and actively contributed/developed upon:
+- **Original / Upstream Repository**: [horoyoi-san/Hoyo (branch: `hkrpg-RobinSR`)](https://github.com/horoyoi-san/Hoyo/tree/hkrpg-RobinSR)
+- Built upon the foundation of **RobinSR & JadeSR** by [reversedrooms](https://git.xeondev.com/reversedrooms):
   - [RobinSR Repository](https://git.xeondev.com/reversedrooms/RobinSR)
   - [JadeSR Repository](https://git.xeondev.com/reversedrooms/JadeSR)
 - Special thanks to **keiracoder** for earlier updates! 🔥
